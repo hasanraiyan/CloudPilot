@@ -1,0 +1,64 @@
+{
+  "name": "cloudpilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-Powered DevOps Automation Platform for intelligent deployment, monitoring, and self-healing infrastructure.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "infra:status": "docker compose ps",
+    "infra:restart": "docker compose restart",
+    "db:generate": "npm run db:generate -w @cloudpilot/database",
+    "db:validate": "npm run db:validate -w @cloudpilot/database",
+    "db:migrate": "npm run db:migrate -w @cloudpilot/database --",
+    "db:migrate:deploy": "npm run db:migrate:deploy -w @cloudpilot/database",
+    "db:status": "npm run db:status -w @cloudpilot/database",
+    "db:studio": "npm run db:studio -w @cloudpilot/database",
+    "db:format": "npm run db:format -w @cloudpilot/database",
+    "db:typecheck": "npm run typecheck -w @cloudpilot/database",
+    "db:build": "npm run build -w @cloudpilot/database",
+    "queue:typecheck": "npm run typecheck -w @cloudpilot/queue",
+    "queue:build": "npm run build -w @cloudpilot/queue",
+    "queue:diagnostic": "npm run diagnostic -w @cloudpilot/queue",
+    "worker:dev": "npm run dev -w @cloudpilot/worker",
+    "worker:build": "npm run build -w @cloudpilot/worker",
+    "worker:start": "npm run start -w @cloudpilot/worker",
+    "worker:typecheck": "npm run typecheck -w @cloudpilot/worker"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raziquehasan/CloudPilot.git"
+  },
+  "keywords": [
+    "cloudpilot",
+    "devops",
+    "cloud-computing",
+    "docker",
+    "ci-cd",
+    "automation",
+    "postgresql",
+    "redis",
+    "prometheus",
+    "grafana",
+    "typescript",
+    "aws",
+    "monitoring",
+    "self-healing",
+    "ai"
+  ],
+  "author": "Razique Hasan",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "bugs": {
+    "url": "https://github.com/raziquehasan/CloudPilot/issues"
+  },
+  "homepage": "https://github.com/raziquehasan/CloudPilot#readme"
+}

@@ -1,0 +1,271 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum DeploymentStatus {
+  QUEUED
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  ROLLED_BACK
+}
+
+enum BuildStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+enum DeploymentEnvironment {
+  DEVELOPMENT
+  STAGING
+  PRODUCTION
+  PREVIEW
+}
+
+enum AuthProvider {
+  EMAIL_PASSWORD
+  GITHUB
+  GOOGLE
+  MICROSOFT
+}
+
+enum DeploymentTriggerSource {
+  MANUAL
+  GITHUB_PUSH
+  GITHUB_PULL_REQUEST
+  SCHEDULE
+  API
+  ROLLBACK
+}
+
+enum DeploymentFailureCode {
+  BUILD_FAILED
+  DEPLOY_FAILED
+  HEALTH_CHECK_FAILED
+  TIMEOUT
+  CANCELLED
+  UNKNOWN
+}
+
+model User {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email       String            @unique
+  name        String?
+  imageUrl    String?
+  accounts    Account[]
+  memberships WorkspaceMember[]
+  auditLogs   AuditLog[]        @relation("AuditActor")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@map("users")
+}
+
+model Account {
+  id                     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String       @db.Uuid
+  provider               AuthProvider
+  providerAccountId      String
+  passwordHash           String?
+  accessTokenCiphertext  String?
+  refreshTokenCiphertext String?
+  accessTokenKeyId       String?
+  refreshTokenKeyId      String?
+  expiresAt              DateTime?
+  user                   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Workspace {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  slug        String            @unique
+  members     WorkspaceMember[]
+  projects    Project[]
+  deployments Deployment[]
+  auditLogs   AuditLog[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  workspaceId String        @db.Uuid
+  userId      String        @db.Uuid
+  role        WorkspaceRole
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model Project {
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String                @db.Uuid
+  name                 String
+  slug                 String
+  repository           Repository?
+  deployments          Deployment[]
+  environmentVariables EnvironmentVariable[]
+  workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@unique([workspaceId, slug])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, createdAt])
+  @@map("projects")
+}
+
+model Repository {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String   @db.Uuid
+  projectId          String   @unique @db.Uuid
+  provider           String
+  externalId         String
+  name               String
+  cloneUrlCiphertext String?
+  project            Project  @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([workspaceId, provider, externalId])
+  @@unique([workspaceId, projectId])
+  @@index([workspaceId, projectId])
+  @@map("repositories")
+}
+
+model Deployment {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId    String                  @db.Uuid
+  projectId      String                  @db.Uuid
+  environment    DeploymentEnvironment
+  status         DeploymentStatus        @default(QUEUED)
+  triggerSource  DeploymentTriggerSource @default(API)
+  failureCode    DeploymentFailureCode?
+  idempotencyKey String?
+  gitRef         String?
+  commitSha      String?
+  rollbackOfId   String?                 @db.Uuid
+  workspace      Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project        Project                 @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
+  rollbackOf     Deployment?             @relation("DeploymentRollback", fields: [workspaceId, projectId, rollbackOfId], references: [workspaceId, projectId, id], onDelete: Restrict)
+  rollbacks      Deployment[]            @relation("DeploymentRollback")
+  builds         Build[]
+  logs           DeploymentLog[]
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, projectId, id])
+  @@unique([workspaceId, projectId, environment, idempotencyKey])
+  @@index([workspaceId, projectId, createdAt])
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, environment, createdAt])
+  @@map("deployments")
+}
+
+model Build {
+  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String      @db.Uuid
+  deploymentId         String      @db.Uuid
+  status               BuildStatus @default(QUEUED)
+  artifactReference    String?
+  imageReference       String?
+  immutableImageDigest String?
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  deployment           Deployment  @relation(fields: [workspaceId, deploymentId], references: [workspaceId, id], onDelete: Cascade)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, deploymentId, createdAt])
+  @@map("builds")
+}
+
+model DeploymentLog {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String     @db.Uuid
+  deploymentId String     @db.Uuid
+  level        LogLevel
+  message      String
+  sequence     BigInt
+  deployment   Deployment @relation(fields: [workspaceId, deploymentId], references: [workspaceId, id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([workspaceId, deploymentId, sequence])
+  @@index([workspaceId, deploymentId, createdAt])
+  @@map("deployment_logs")
+}
+
+model EnvironmentVariable {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String                @db.Uuid
+  projectId       String                @db.Uuid
+  environment     DeploymentEnvironment @default(DEVELOPMENT)
+  key             String
+  encryptedValue  String
+  encryptionKeyId String
+  project         Project               @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@unique([workspaceId, projectId, environment, key])
+  @@index([workspaceId, projectId, environment])
+  @@map("environment_variables")
+}
+
+model AuditLog {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @db.Uuid
+  actorId     String?   @db.Uuid
+  action      String
+  entityType  String
+  entityId    String    @db.Uuid
+  metadata    Json?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  actor       User?     @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, entityType, entityId])
+  @@map("audit_logs")
+}
