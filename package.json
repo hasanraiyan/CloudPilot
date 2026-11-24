@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "build": "npm run db:build && npm run queue:build && npm run worker:build && npm run build -w @cloudpilot/api && npm run build -w web",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f",

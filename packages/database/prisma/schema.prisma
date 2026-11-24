@@ -78,12 +78,29 @@ model User {
   name        String?
   imageUrl    String?
   accounts    Account[]
+  sessions    Session[]
   memberships WorkspaceMember[]
   auditLogs   AuditLog[]        @relation("AuditActor")
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@map("users")
+}
+
+model Session {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  csrfHash  String
+  activeWorkspaceId String? @db.Uuid
+  expiresAt DateTime
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeWorkspace Workspace? @relation(fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+  @@map("sessions")
 }
 
 model Account {
@@ -111,6 +128,7 @@ model Workspace {
   name        String
   slug        String            @unique
   members     WorkspaceMember[]
+  activeSessions Session[]
   projects    Project[]
   deployments Deployment[]
   auditLogs   AuditLog[]
@@ -138,6 +156,7 @@ model Project {
   id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspaceId          String                @db.Uuid
   name                 String
+  description          String?               @db.VarChar(500)
   slug                 String
   repository           Repository?
   deployments          Deployment[]

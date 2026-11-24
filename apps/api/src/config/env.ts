@@ -16,6 +16,10 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
   DATABASE_URL: z.string().trim().min(1).startsWith("postgresql://"),
   REDIS_URL: z.string().trim().min(1).startsWith("redis://"),
+  GITHUB_CLIENT_ID: z.string().trim().min(1).optional(),
+  GITHUB_CLIENT_SECRET: z.string().trim().min(1).optional(),
+  GITHUB_CALLBACK_URL: z.string().trim().url().optional(),
+  AUTH_SECRET: z.string().trim().min(32).optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
