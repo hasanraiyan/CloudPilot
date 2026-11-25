@@ -24,6 +24,7 @@ export interface GitHubRepositoryRecord {
 
 export interface VerifiedGitHubInstallation {
   id: number;
+  appId: number;
   account: { id: number; login: string; type: string };
   repository_selection: "all" | "selected";
   suspended_at: string | null;
@@ -61,6 +62,7 @@ export async function verifyAppInstallation(installationId: bigint): Promise<Ver
     if (!account || !("login" in account) || !("type" in account)) throw new GitHubServiceError(502, "GitHub returned invalid installation metadata.");
     return {
       id: response.data.id,
+      appId: response.data.app_id,
       account: { id: Number(account.id), login: account.login, type: account.type },
       repository_selection: response.data.repository_selection,
       suspended_at: response.data.suspended_at,
@@ -104,6 +106,34 @@ export async function listRepositoryBranches(installationId: bigint, owner: stri
       owner,
       repo: repository,
       per_page: 100,
+    });
+  } catch (error) {
+    throw mapGitHubError(error);
+  }
+}
+
+export interface UserAuthorizedInstallation {
+  id: number;
+  app_id: number;
+  account: { id: number; login: string; type: string };
+  repository_selection: "all" | "selected";
+  suspended_at: string | null;
+}
+
+export async function listUserAuthorizedInstallations(accessToken: string): Promise<UserAuthorizedInstallation[]> {
+  const octokit = new Octokit({ auth: accessToken });
+  try {
+    const installations = await octokit.paginate(octokit.rest.apps.listInstallationsForAuthenticatedUser, { per_page: 100 });
+    return installations.flatMap((installation): UserAuthorizedInstallation[] => {
+      const account = installation.account;
+      if (!account || !("type" in account) || !account.login) return [];
+      return [{
+        id: installation.id,
+        app_id: installation.app_id,
+        account: { id: account.id, login: account.login, type: account.type },
+        repository_selection: installation.repository_selection,
+        suspended_at: installation.suspended_at,
+      }];
     });
   } catch (error) {
     throw mapGitHubError(error);

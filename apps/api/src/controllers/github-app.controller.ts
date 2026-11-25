@@ -11,7 +11,9 @@ import {
   GitHubServiceError,
   listInstallationRepositories,
   listRepositoryBranches,
+  listUserAuthorizedInstallations,
   verifyAppInstallation,
+  type UserAuthorizedInstallation,
 } from "../services/github-app.service.js";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
@@ -22,7 +24,7 @@ const projectImportSchema = z.object({
 
 type Membership = { workspaceId: string; role: string };
 type GitHubIdentity = { id: number; login: string };
-type UserInstallation = { id: number; account?: { id?: number } };
+type UserInstallation = UserAuthorizedInstallation;
 
 const hashState = (state: string) => createHash("sha256").update(state).digest("hex");
 const stateValue = () => randomBytes(32).toString("base64url");
@@ -137,8 +139,37 @@ async function verifyInstallationRecord(req: Request, rawId: unknown) {
   return { installation, member } as const;
 }
 
-async function startInstallation(req: Request, res: Response): Promise<void> {
-  if (!env.GITHUB_APP_SLUG || !env.GITHUB_APP_CLIENT_ID || !env.GITHUB_APP_CLIENT_SECRET || !env.GITHUB_INSTALLATION_OAUTH_CALLBACK_URL) {
+function appAuthorizationConfigured(): boolean {
+  return Boolean(env.GITHUB_APP_CLIENT_ID && env.GITHUB_APP_CLIENT_SECRET && env.GITHUB_INSTALLATION_OAUTH_CALLBACK_URL);
+}
+
+function authorizeGitHubUrl(state: string): URL {
+  const authorize = new URL("https://github.com/login/oauth/authorize");
+  authorize.searchParams.set("client_id", env.GITHUB_APP_CLIENT_ID!);
+  authorize.searchParams.set("redirect_uri", redirectUri());
+  authorize.searchParams.set("state", state);
+  return authorize;
+}
+
+async function startUserAuthorization(req: Request, res: Response): Promise<void> {
+  if (!appAuthorizationConfigured()) {
+    if (req.get("accept")?.includes("text/html")) {
+      const frontend = env.corsOrigins[0] ?? "http://localhost:3000";
+      res.redirect(302, `${frontend}/dashboard/projects?github=configuration`);
+      return;
+    }
+    sendError(res, 503, "GITHUB_APP_NOT_CONFIGURED", "GitHub App user authorization settings are incomplete."); return;
+  }
+  try {
+    const member = await currentMembership(req);
+    if (!member || !canManage(member.role)) { sendError(res, 403, "FORBIDDEN", "Workspace administrator access required."); return; }
+    const state = await createState(req, member.workspaceId, "INSTALL_AUTHORIZATION");
+    res.redirect(302, authorizeGitHubUrl(state).toString());
+  } catch (error) { sendGitHubError(res, error); }
+}
+
+async function startNewInstallation(req: Request, res: Response): Promise<void> {
+  if (!env.GITHUB_APP_SLUG || !appAuthorizationConfigured()) {
     if (req.get("accept")?.includes("text/html")) {
       const frontend = env.corsOrigins[0] ?? "http://localhost:3000";
       res.redirect(302, `${frontend}/dashboard/projects?github=configuration`);
@@ -167,13 +198,12 @@ async function installationCallback(req: Request, res: Response): Promise<void> 
       where: { workspaceId_userId: { workspaceId: state.workspaceId, userId: req.userId! } }, select: { role: true },
     });
     if (!membership || !canManage(membership.role)) { sendError(res, 403, "FORBIDDEN", "Workspace administrator access required."); return; }
-    await verifyAppInstallation(installationId);
+    const verified = await verifyAppInstallation(installationId);
+    if (verified.appId !== Number(env.GITHUB_APP_ID) || verified.id !== Number(installationId)) {
+      sendError(res, 403, "INSTALLATION_APP_MISMATCH", "This installation does not belong to the configured GitHub App."); return;
+    }
     const authorizationState = await createState(req, state.workspaceId, "INSTALL_AUTHORIZATION", installationId);
-    const authorize = new URL("https://github.com/login/oauth/authorize");
-    authorize.searchParams.set("client_id", env.GITHUB_APP_CLIENT_ID!);
-    authorize.searchParams.set("redirect_uri", redirectUri());
-    authorize.searchParams.set("state", authorizationState);
-    res.redirect(302, authorize.toString());
+    res.redirect(302, authorizeGitHubUrl(authorizationState).toString());
   } catch (error) { sendGitHubError(res, error); }
 }
 
@@ -181,7 +211,7 @@ async function installationAuthorizationCallback(req: Request, res: Response): P
   const frontendProjects = `${env.corsOrigins[0] ?? "http://localhost:3000"}/dashboard/projects`;
   try {
     const state = await consumeState(req, req.query.state, "INSTALL_AUTHORIZATION");
-    if (!state?.installationId) { res.redirect(`${frontendProjects}?github=invalid_state`); return; }
+    if (!state) { res.redirect(`${frontendProjects}?github=invalid_state`); return; }
     if (typeof req.query.error === "string") { res.redirect(`${frontendProjects}?github=authorization_denied`); return; }
     if (typeof req.query.code !== "string" || req.query.code.length > 512) { res.redirect(`${frontendProjects}?github=authorization_failed`); return; }
 
@@ -190,11 +220,21 @@ async function installationAuthorizationCallback(req: Request, res: Response): P
     if (!Number.isSafeInteger(identity.id) || identity.id <= 0 || typeof identity.login !== "string") {
       res.redirect(`${frontendProjects}?github=authorization_failed`); return;
     }
-    const authorizedInstallation = await fetchGitHubUser<UserInstallation>(token, `/user/installations/${state.installationId.toString()}`);
-    if (BigInt(authorizedInstallation.id) !== state.installationId) { res.redirect(`${frontendProjects}?github=installation_forbidden`); return; }
-
-    const appInstallation = await verifyAppInstallation(state.installationId);
-    if (authorizedInstallation.account?.id !== appInstallation.account.id) { res.redirect(`${frontendProjects}?github=installation_forbidden`); return; }
+    const expectedAppId = Number(env.GITHUB_APP_ID);
+    if (!Number.isSafeInteger(expectedAppId) || expectedAppId <= 0) throw new GitHubServiceError(503, "GitHub App ID is invalid.");
+    const authorizedInstallations = state.installationId
+      ? [await fetchGitHubUser<UserInstallation>(token, `/user/installations/${state.installationId.toString()}`)]
+      : await listUserAuthorizedInstallations(token);
+    const appCandidates = authorizedInstallations.filter((installation) => installation.app_id === expectedAppId);
+    const verifiedInstallations: Array<{ installationId: bigint; appInstallation: Awaited<ReturnType<typeof verifyAppInstallation>> }> = [];
+    for (const authorizedInstallation of appCandidates) {
+      const installationId = BigInt(authorizedInstallation.id);
+      if (state.installationId && installationId !== state.installationId) continue;
+      const appInstallation = await verifyAppInstallation(installationId);
+      if (appInstallation.appId !== expectedAppId || appInstallation.id !== authorizedInstallation.id || appInstallation.account.id !== authorizedInstallation.account.id) continue;
+      verifiedInstallations.push({ installationId, appInstallation });
+    }
+    if (!verifiedInstallations.length) { res.redirect(`${frontendProjects}?github=installation_required`); return; }
     const accountId = String(identity.id);
 
     await prisma.$transaction(async (tx) => {
@@ -204,40 +244,49 @@ async function installationAuthorizationCallback(req: Request, res: Response): P
         where: { provider_providerAccountId: { provider: "GITHUB", providerAccountId: accountId } }, select: { userId: true },
       });
       if (account && account.userId !== req.userId) throw new GitHubServiceError(403, "This GitHub identity is linked to another CloudPilot user.");
-      const existing = await tx.gitHubInstallation.findUnique({ where: { installationId: state.installationId! } });
-      if (existing && existing.workspaceId !== state.workspaceId) throw new GitHubServiceError(409, "This GitHub installation is already connected to another workspace.");
-      if (!account) await tx.account.create({ data: { userId: req.userId!, provider: "GITHUB", providerAccountId: accountId } });
-      await tx.gitHubInstallation.upsert({
-        where: { installationId: state.installationId! },
-        create: {
-          workspaceId: state.workspaceId,
-          installationId: state.installationId!,
-          githubAccountId: BigInt(appInstallation.account.id),
-          accountLogin: appInstallation.account.login,
-          accountType: appInstallation.account.type,
-          repositorySelection: appInstallation.repository_selection === "all" ? "ALL" : "SELECTED",
-          status: appInstallation.suspended_at ? "SUSPENDED" : "ACTIVE",
-          suspendedAt: appInstallation.suspended_at ? new Date(appInstallation.suspended_at) : null,
-          authorizedGithubUserId: accountId,
-          authorizedUserId: req.userId!,
-          installedByUserId: req.userId!,
-        },
-        update: {
-          githubAccountId: BigInt(appInstallation.account.id),
-          accountLogin: appInstallation.account.login,
-          accountType: appInstallation.account.type,
-          repositorySelection: appInstallation.repository_selection === "all" ? "ALL" : "SELECTED",
-          status: appInstallation.suspended_at ? "SUSPENDED" : "ACTIVE",
-          suspendedAt: appInstallation.suspended_at ? new Date(appInstallation.suspended_at) : null,
-          authorizedGithubUserId: accountId,
-          authorizedUserId: req.userId!,
-          installedByUserId: req.userId!,
-        },
+      const installationIds = verifiedInstallations.map(({ installationId }) => installationId);
+      const conflicts = await tx.gitHubInstallation.findMany({
+        where: { installationId: { in: installationIds }, workspaceId: { not: state.workspaceId } },
+        select: { installationId: true },
       });
+      const conflictIds = new Set(conflicts.map(({ installationId }) => installationId.toString()));
+      const connectable = verifiedInstallations.filter(({ installationId }) => !conflictIds.has(installationId.toString()));
+      if (!connectable.length) throw new GitHubServiceError(409, "This GitHub installation is already connected to another workspace.");
+      if (!account) await tx.account.create({ data: { userId: req.userId!, provider: "GITHUB", providerAccountId: accountId } });
+      for (const { installationId, appInstallation } of connectable) {
+        await tx.gitHubInstallation.upsert({
+          where: { installationId },
+          create: {
+            workspaceId: state.workspaceId,
+            installationId,
+            githubAccountId: BigInt(appInstallation.account.id),
+            accountLogin: appInstallation.account.login,
+            accountType: appInstallation.account.type,
+            repositorySelection: appInstallation.repository_selection === "all" ? "ALL" : "SELECTED",
+            status: appInstallation.suspended_at ? "SUSPENDED" : "ACTIVE",
+            suspendedAt: appInstallation.suspended_at ? new Date(appInstallation.suspended_at) : null,
+            authorizedGithubUserId: accountId,
+            authorizedUserId: req.userId!,
+            installedByUserId: req.userId!,
+          },
+          update: {
+            githubAccountId: BigInt(appInstallation.account.id),
+            accountLogin: appInstallation.account.login,
+            accountType: appInstallation.account.type,
+            repositorySelection: appInstallation.repository_selection === "all" ? "ALL" : "SELECTED",
+            status: appInstallation.suspended_at ? "SUSPENDED" : "ACTIVE",
+            suspendedAt: appInstallation.suspended_at ? new Date(appInstallation.suspended_at) : null,
+            authorizedGithubUserId: accountId,
+            authorizedUserId: req.userId!,
+            installedByUserId: req.userId!,
+          },
+        });
+      }
     });
     res.redirect(`${frontendProjects}?github=connected`);
   } catch (error) {
-    if (error instanceof GitHubServiceError && error.status === 403) { res.redirect(`${frontendProjects}?github=installation_forbidden`); return; }
+    if (error instanceof GitHubServiceError && error.status === 403 && error.message.includes("identity is linked")) { res.redirect(`${frontendProjects}?github=identity_conflict`); return; }
+    if (error instanceof GitHubServiceError && (error.status === 401 || error.status === 403 || error.status === 404)) { res.redirect(`${frontendProjects}?github=installation_forbidden`); return; }
     if (error instanceof GitHubServiceError && error.status === 409) { res.redirect(`${frontendProjects}?github=workspace_conflict`); return; }
     if (error instanceof GitHubServiceError && error.status === 429) { res.redirect(`${frontendProjects}?github=rate_limited`); return; }
     res.redirect(`${frontendProjects}?github=connection_failed`);
@@ -338,7 +387,8 @@ async function importRepository(req: Request, res: Response): Promise<void> {
 
 export const githubAppRouter = Router();
 githubAppRouter.use(requireAuth);
-githubAppRouter.get("/installations/start", startInstallation);
+githubAppRouter.get("/installations/start", startUserAuthorization);
+githubAppRouter.get("/installations/install", startNewInstallation);
 githubAppRouter.get("/installations/callback", installationCallback);
 githubAppRouter.get("/installations/authorize/callback", installationAuthorizationCallback);
 githubAppRouter.get("/installations", listInstallations);
