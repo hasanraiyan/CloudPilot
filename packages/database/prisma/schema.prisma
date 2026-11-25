@@ -18,10 +18,17 @@ enum WorkspaceRole {
 enum DeploymentStatus {
   QUEUED
   PENDING
+  PREPARING
+  CLONING
+  BUILDING
+  DEPLOYING
+  HEALTH_CHECKING
   RUNNING
   SUCCEEDED
   FAILED
+  CANCELLING
   CANCELLED
+  STOPPED
   ROLLED_BACK
 }
 
@@ -100,6 +107,7 @@ model User {
   githubInstallations GitHubInstallation[] @relation("GitHubInstallationAuthorizedUser")
   githubAppsInstalled GitHubInstallation[] @relation("GitHubInstallationInstaller")
   githubAppStates     GitHubAppState[]
+  triggeredDeployments Deployment[]        @relation("DeploymentTriggeredBy")
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -315,10 +323,20 @@ model Deployment {
   gitRef         String?
   commitSha      String?
   rollbackOfId   String?                 @db.Uuid
+  previousDeploymentId       String?                 @db.Uuid
+  requestedBranch            String?                 @db.VarChar(255)
+  commitMessage              String?                 @db.Text
+  triggeredByUserId          String?                 @db.Uuid
+  buildConfigurationSnapshot Json?
+  queueJobId                 String?                 @unique @db.VarChar(128)
+  failureMessage             String?                 @db.Text
   workspace      Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project        Project                 @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
   rollbackOf     Deployment?             @relation("DeploymentRollback", fields: [workspaceId, projectId, rollbackOfId], references: [workspaceId, projectId, id], onDelete: Restrict)
   rollbacks      Deployment[]            @relation("DeploymentRollback")
+  previousDeployment Deployment?         @relation("DeploymentPrevious", fields: [workspaceId, projectId, previousDeploymentId], references: [workspaceId, projectId, id], onDelete: Restrict)
+  subsequentDeployments Deployment[]     @relation("DeploymentPrevious")
+  triggeredBy    User?                    @relation("DeploymentTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
   builds         Build[]
   logs           DeploymentLog[]
   createdAt      DateTime                @default(now())
@@ -332,6 +350,8 @@ model Deployment {
   @@index([workspaceId, projectId, createdAt])
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, environment, createdAt])
+  @@index([workspaceId, projectId, status, createdAt])
+  @@index([workspaceId, triggeredByUserId, createdAt])
   @@map("deployments")
 }
 

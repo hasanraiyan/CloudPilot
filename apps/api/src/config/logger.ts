@@ -8,6 +8,7 @@ export const logger = pino({
       "req.headers.authorization",
       "req.headers.cookie",
       "req.headers['x-api-key']",
+      "req.headers['x-csrf-token']",
       "req.url",
       "req.query.state",
       "req.query.code",

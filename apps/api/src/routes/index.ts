@@ -9,6 +9,7 @@ import { githubAppRouter } from "../controllers/github-app.controller.js";
 import { projectRepositoryRouter } from "../controllers/project-repository.controller.js";
 import { projectBuildConfigurationRouter } from "../controllers/project-build-configuration.controller.js";
 import { projectEnvironmentVariableRouter } from "../controllers/project-environment-variable.controller.js";
+import { projectDeploymentRouter } from "../controllers/project-deployment.controller.js";
 
 export const routes = Router();
 
@@ -20,4 +21,5 @@ routes.use(`/api/${env.API_VERSION}/github`, githubAppRouter);
 routes.use(`/api/${env.API_VERSION}/projects`, projectEnvironmentVariableRouter);
 routes.use(`/api/${env.API_VERSION}/projects`, projectRepositoryRouter);
 routes.use(`/api/${env.API_VERSION}/projects`, projectBuildConfigurationRouter);
+routes.use(`/api/${env.API_VERSION}/projects`, projectDeploymentRouter);
 routes.use(`/api/${env.API_VERSION}`, workspaceRouter);
