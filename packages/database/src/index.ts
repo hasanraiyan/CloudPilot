@@ -4,6 +4,8 @@ import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "./generated/prisma/client.js";
 
+export { Prisma } from "./generated/prisma/client.js";
+
 config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
 const databaseUrl = process.env.DATABASE_URL;

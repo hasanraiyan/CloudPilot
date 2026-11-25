@@ -28,6 +28,7 @@ export interface VerifiedGitHubInstallation {
   account: { id: number; login: string; type: string };
   repository_selection: "all" | "selected";
   suspended_at: string | null;
+  permissions: Record<string, string>;
 }
 
 export async function createGitHubApp(): Promise<App<{ Octokit: typeof Octokit }>> {
@@ -66,6 +67,7 @@ export async function verifyAppInstallation(installationId: bigint): Promise<Ver
       account: { id: Number(account.id), login: account.login, type: account.type },
       repository_selection: response.data.repository_selection,
       suspended_at: response.data.suspended_at,
+      permissions: Object.fromEntries(Object.entries(response.data.permissions).map(([key, value]) => [key, String(value)])),
     };
   } catch (error) {
     throw mapGitHubError(error);

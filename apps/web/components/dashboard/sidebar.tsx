@@ -34,13 +34,15 @@ const items = [
   ["settings", "Settings", Settings],
 ] as const;
 
-export function DashboardSidebar({ mobile = false }: { mobile?: boolean }) {
+export function DashboardSidebar({ mobile = false, onNavigate }: { mobile?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { activeWorkspace } = useDashboard();
 
+  const compact = collapsed && !mobile;
+
   return (
-    <aside className={`${mobile ? "flex" : "hidden lg:flex"} ${collapsed && !mobile ? "w-[72px]" : "w-[240px]"} sticky top-0 h-screen shrink-0 flex-col border-r border-zinc-200 bg-white px-3 py-4 transition-[width] dark:border-zinc-800 dark:bg-zinc-950`}>
+    <aside className={`${mobile ? "flex" : "hidden lg:flex"} ${mobile ? "h-full w-full" : `sticky top-0 h-dvh ${compact ? "w-[64px]" : "w-[216px]"}`} min-h-0 shrink-0 flex-col border-r border-zinc-200 bg-white px-3 py-4 transition-[width] dark:border-zinc-800 dark:bg-zinc-950`}>
       <div className={`flex items-center ${collapsed && !mobile ? "justify-center" : "justify-between"} px-1`}>
         {(!collapsed || mobile) && <Brand compact />}
         {!mobile && (
@@ -49,20 +51,20 @@ export function DashboardSidebar({ mobile = false }: { mobile?: boolean }) {
           </button>
         )}
       </div>
-      <div className="mt-5">
-        <Link href="/dashboard/settings#workspaces" className="flex h-10 w-full items-center gap-2 rounded-lg border border-zinc-200 px-2.5 text-left text-xs dark:border-zinc-800">
-          <span className="grid size-6 place-items-center rounded-md bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"><Box className="size-3" /></span>
+      <div className="mt-4 shrink-0">
+        <Link href="/dashboard/settings#workspaces" onClick={onNavigate} aria-label={`Workspace settings for ${activeWorkspace?.name ?? "current workspace"}`} className={`flex h-10 w-full items-center gap-2 rounded-lg border border-zinc-200 text-left text-xs dark:border-zinc-800 ${compact ? "justify-center" : "px-2.5"}`}>
+          <span className="grid size-6 shrink-0 place-items-center rounded-md bg-zinc-950 text-white dark:bg-white dark:text-zinc-950"><Box className="size-3" /></span>
           {(!collapsed || mobile) && <><span className="min-w-0 flex-1 truncate font-medium">{activeWorkspace?.name ?? "Workspace"}</span><span className="text-zinc-400">↗</span></>}
         </Link>
       </div>
-      <nav aria-label="Dashboard navigation" className="mt-5 flex-1 space-y-1">
+      <nav aria-label="Dashboard navigation" className="mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain">
         {items.map(([slug, label, Icon]) => {
           const href = slug === "overview" ? "/dashboard" : `/dashboard/${slug}`;
-          const active = pathname === href;
+          const active = pathname === href || (slug === "projects" && pathname.startsWith("/dashboard/projects/"));
           return (
-            <Link key={slug} href={href} title={collapsed && !mobile ? label : undefined} className={`flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[12px] transition-colors ${active ? "bg-zinc-100 font-medium text-zinc-950 dark:bg-zinc-900 dark:text-white" : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"} ${collapsed && !mobile ? "justify-center" : ""}`}>
+            <Link key={slug} href={href} onClick={onNavigate} aria-label={label} aria-current={active ? "page" : undefined} title={collapsed && !mobile ? label : undefined} className={`flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-1 text-[12px] transition-colors ${active ? "bg-zinc-100 font-medium text-zinc-950 dark:bg-zinc-900 dark:text-white" : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"} ${collapsed && !mobile ? "justify-center" : ""}`}>
               <Icon className="size-4 shrink-0" />
-              {(!collapsed || mobile) && <span>{label}</span>}
+              {(!collapsed || mobile) && <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>}
             </Link>
           );
         })}

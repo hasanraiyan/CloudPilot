@@ -39,14 +39,16 @@ export function errorMiddleware(
     }));
   }
 
+  const secretRoute = req.path.includes("/environment-variables");
+  const requestContext = { requestId: req.requestId, method: req.method, url: secretRoute ? undefined : req.originalUrl };
   if (statusCode >= 500) {
     logger.error(
-      { err: error, requestId: req.requestId, method: req.method, url: req.originalUrl },
+      { ...requestContext, err: secretRoute ? undefined : error },
       "Unhandled request error",
     );
   } else {
     logger.warn(
-      { requestId: req.requestId, method: req.method, url: req.originalUrl, statusCode, code },
+      { ...requestContext, statusCode, code },
       "Request error",
     );
   }

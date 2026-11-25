@@ -1,8 +1,9 @@
-# CloudPilot Security Advisory Resolution
+# CloudPilot Security Advisories
 
 ## Advisory
 
-GitHub advisory `GHSA-7589-6fvf-x4pw` reports a ReDoS vulnerability in
+**Status: Open at the Phase 4 release.** [GitHub advisory GHSA-7589-6fvf-x4pw](https://github.com/advisories/GHSA-7589-6fvf-x4pw)
+reports a ReDoS vulnerability (CVE-2026-121707) in
 `Schema.TemplateLiteral` in `effect` versions through `3.22.0`.
 
 The affected package chain in the current Prisma 7 dependency set is:
@@ -14,7 +15,7 @@ The affected package chain in the current Prisma 7 dependency set is:
 -> effect@3.20.0
 ```
 
-The candidate patched Effect release is `3.22.5`.
+The first patched Effect release is `3.22.1`.
 
 ## Root Cause
 
@@ -51,10 +52,9 @@ After resolution, verify:
 
 ## Override Removal Criteria
 
-An Effect override may be reconsidered only when a compatible stable Prisma release
-publishes an upgrade that does not require a major version change. Verify the actual
-installed dependency tree and audit result; package-manifest overrides alone are not
-evidence of a fix.
+Close this advisory after adopting a compatible Prisma release or supported
+dependency resolution that installs a patched Effect version. Verify the installed
+dependency tree, rerun both audits, and confirm Prisma CLI and database compatibility.
 
 ## Residual Risk
 

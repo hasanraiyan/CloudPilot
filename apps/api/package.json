@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/project-intelligence.test.ts",
+    "test:repository-live": "node test/live-repository-smoke.mjs"
   },
   "keywords": [],
   "author": "",

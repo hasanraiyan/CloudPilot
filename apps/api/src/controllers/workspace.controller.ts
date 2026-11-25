@@ -7,6 +7,16 @@ import { requireAuth, requireCsrf } from "../middlewares/auth.middleware.js";
 const nameSchema = z.object({ name: z.string().trim().min(1).max(80) }).strict();
 const projectSchema = z.object({ name: z.string().trim().min(1).max(80), description: z.string().trim().max(500).optional().nullable() }).strict();
 const slugify = (value: string) => value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "workspace";
+const projectDetailsInclude = {
+  repository: { select: {
+    id: true, provider: true, externalId: true, name: true, fullName: true, defaultBranch: true,
+    selectedBranch: true, language: true, isPrivate: true, createdAt: true, updatedAt: true,
+    installation: { select: { accountLogin: true, accountType: true, status: true, repositorySelection: true } },
+  } },
+  deployments: { orderBy: { createdAt: "desc" as const }, take: 8, select: { id: true, status: true, environment: true, triggerSource: true, createdAt: true, startedAt: true, finishedAt: true, failureCode: true } },
+  environmentVariables: { orderBy: [{ environment: "asc" as const }, { key: "asc" as const }], select: { id: true, key: true, environment: true, createdAt: true, updatedAt: true } },
+  _count: { select: { deployments: true, environmentVariables: true } },
+};
 
 async function activeWorkspace(req: Request) {
   const session = await prisma.session.findUnique({ where: { id: req.sessionId! }, select: { activeWorkspaceId: true } });
@@ -88,7 +98,7 @@ async function logsSummary(req: Request, res: Response) {
 async function listProjects(req: Request, res: Response) {
   const member = await activeWorkspace(req); if (!member) { res.json({ success: true, data: [] }); return; }
   const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 100) : "";
-  const data = await prisma.project.findMany({ where: { workspaceId: member.workspaceId, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { description: { contains: q, mode: "insensitive" } }] } : {}) }, orderBy: { updatedAt: "desc" }, include: { repository: { select: { fullName: true, selectedBranch: true, defaultBranch: true, language: true, isPrivate: true } }, _count: { select: { deployments: true } } } });
+  const data = await prisma.project.findMany({ where: { workspaceId: member.workspaceId, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { description: { contains: q, mode: "insensitive" } }] } : {}) }, orderBy: { updatedAt: "desc" }, include: { repository: { select: { fullName: true, selectedBranch: true, defaultBranch: true, language: true, isPrivate: true } }, deployments: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, createdAt: true } }, _count: { select: { deployments: true } } } });
   res.json({ success: true, data });
 }
 async function createProject(req: Request, res: Response) {
@@ -103,14 +113,21 @@ async function createProject(req: Request, res: Response) {
 async function projectById(req: Request, res: Response) {
   const member = await activeWorkspace(req); const id = z.string().uuid().safeParse(req.params.id);
   if (!id.success || !member) { res.status(404).json({ success: false, error: { code: "PROJECT_NOT_FOUND", message: "Project not found." } }); return; }
-  const project = await prisma.project.findFirst({ where: { id: id.data, workspaceId: member.workspaceId }, include: { _count: { select: { deployments: true } } } });
+  const project = await prisma.project.findFirst({
+    where: { id: id.data, workspaceId: member.workspaceId },
+    include: projectDetailsInclude,
+  });
   if (!project) { res.status(404).json({ success: false, error: { code: "PROJECT_NOT_FOUND", message: "Project not found." } }); return; }
   if (req.method === "GET") { res.json({ success: true, data: project }); return; }
   if (!canManage(member.role)) { res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "Workspace administrator access required." } }); return; }
   if (req.method === "DELETE") { await prisma.project.delete({ where: { id: project.id } }); res.status(204).send(); return; }
   const parsed = projectSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Enter a valid project name and description." } }); return; }
-  const updated = await prisma.project.update({ where: { id: project.id }, data: { name: parsed.data.name, description: parsed.data.description || null } });
+  await prisma.project.update({ where: { id: project.id }, data: { name: parsed.data.name, description: parsed.data.description || null } });
+  const updated = await prisma.project.findFirst({
+    where: { id: project.id, workspaceId: member.workspaceId },
+    include: projectDetailsInclude,
+  });
   res.json({ success: true, data: updated });
 }
 

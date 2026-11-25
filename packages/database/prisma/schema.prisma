@@ -154,7 +154,6 @@ model Workspace {
   deployments         Deployment[]
   auditLogs           AuditLog[]
   githubInstallations GitHubInstallation[]
-  githubAppStates     GitHubAppState[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -183,6 +182,7 @@ model Project {
   description          String?               @db.VarChar(500)
   slug                 String
   repository           Repository?
+  buildConfiguration   ProjectBuildConfiguration?
   deployments          Deployment[]
   environmentVariables EnvironmentVariable[]
   workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -209,6 +209,17 @@ model Repository {
   selectedBranch          String?
   language                String?
   isPrivate               Boolean             @default(false)
+  description             String?             @db.VarChar(500)
+  githubOwnerLogin        String?
+  githubOwnerType         String?
+  stars                   Int                 @default(0)
+  forks                   Int                 @default(0)
+  openIssuesCount         Int                 @default(0)
+  sizeKb                  Int                 @default(0)
+  lastPushedAt            DateTime?
+  githubUpdatedAt         DateTime?
+  isArchived              Boolean             @default(false)
+  lastSyncedAt            DateTime?
   cloneUrlCiphertext      String?
   project                 Project             @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
   installation            GitHubInstallation? @relation(fields: [installationWorkspaceId, installationId], references: [workspaceId, id], onDelete: Restrict)
@@ -220,6 +231,30 @@ model Repository {
   @@index([workspaceId, projectId])
   @@index([installationWorkspaceId, installationId])
   @@map("repositories")
+}
+
+model ProjectBuildConfiguration {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String                 @db.Uuid
+  projectId            String                 @db.Uuid
+  framework            String?                @db.VarChar(80)
+  runtime              String?                @db.VarChar(80)
+  packageManager       String?                @db.VarChar(80)
+  rootDirectory        String?                @db.VarChar(500)
+  installCommand       String?                @db.Text
+  buildCommand         String?                @db.Text
+  startCommand         String?                @db.Text
+  dockerfilePath       String?                @db.VarChar(500)
+  applicationPort      Int?
+  buildTimeoutSeconds Int?                   @db.Integer
+  environment          DeploymentEnvironment?
+  project              Project                @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  @@unique([workspaceId, projectId])
+  @@index([workspaceId, updatedAt])
+  @@map("project_build_configurations")
 }
 
 model GitHubInstallation {
@@ -262,7 +297,6 @@ model GitHubAppState {
   user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   session         Session               @relation(fields: [sessionId, userId], references: [id, userId], onDelete: Cascade)
   workspaceMember WorkspaceMember       @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
-  workspace       Workspace             @relation(fields: [workspaceId], references: [id])
 
   @@index([userId, purpose, expiresAt])
   @@index([sessionId, expiresAt])
@@ -294,7 +328,7 @@ model Deployment {
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, projectId, id])
-  @@unique([workspaceId, projectId, environment, idempotencyKey])
+  @@unique([workspaceId, projectId, environment, idempotencyKey], map: "deployments_workspaceId_projectId_environment_idempotencyKey_ke")
   @@index([workspaceId, projectId, createdAt])
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, environment, createdAt])

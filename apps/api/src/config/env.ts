@@ -26,6 +26,7 @@ const envSchema = z.object({
   GITHUB_APP_CLIENT_SECRET: z.string().trim().min(1).optional(),
   GITHUB_INSTALLATION_OAUTH_CALLBACK_URL: z.string().trim().url().optional(),
   AUTH_SECRET: z.string().trim().min(32).optional(),
+  ENVIRONMENT_VARIABLE_ENCRYPTION_KEY: z.preprocess((value) => value === "" ? undefined : value, z.string().regex(/^[a-f0-9]{64}$/i).optional()),
 }).superRefine((values, context) => {
   const appFields = [values.GITHUB_APP_ID, values.GITHUB_APP_SLUG, values.GITHUB_APP_PRIVATE_KEY_PATH];
   if (appFields.some(Boolean) && !appFields.every(Boolean)) {
