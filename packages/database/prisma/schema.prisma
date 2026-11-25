@@ -54,6 +54,22 @@ enum AuthProvider {
   MICROSOFT
 }
 
+enum GitHubInstallationStatus {
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum GitHubRepositorySelection {
+  ALL
+  SELECTED
+}
+
+enum GitHubAppStatePurpose {
+  INSTALL_CALLBACK
+  INSTALL_AUTHORIZATION
+}
+
 enum DeploymentTriggerSource {
   MANUAL
   GITHUB_PUSH
@@ -73,32 +89,37 @@ enum DeploymentFailureCode {
 }
 
 model User {
-  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email       String            @unique
-  name        String?
-  imageUrl    String?
-  accounts    Account[]
-  sessions    Session[]
-  memberships WorkspaceMember[]
-  auditLogs   AuditLog[]        @relation("AuditActor")
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email               String               @unique
+  name                String?
+  imageUrl            String?
+  accounts            Account[]
+  sessions            Session[]
+  memberships         WorkspaceMember[]
+  auditLogs           AuditLog[]           @relation("AuditActor")
+  githubInstallations GitHubInstallation[] @relation("GitHubInstallationAuthorizedUser")
+  githubAppsInstalled GitHubInstallation[] @relation("GitHubInstallationInstaller")
+  githubAppStates     GitHubAppState[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   @@map("users")
 }
 
 model Session {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String    @db.Uuid
-  tokenHash String    @unique
-  csrfHash  String
-  activeWorkspaceId String? @db.Uuid
-  expiresAt DateTime
-  revokedAt DateTime?
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  activeWorkspace Workspace? @relation(fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
-  createdAt DateTime  @default(now())
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String           @db.Uuid
+  tokenHash         String           @unique
+  csrfHash          String
+  activeWorkspaceId String?          @db.Uuid
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeWorkspace   Workspace?       @relation(fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+  githubAppStates   GitHubAppState[]
+  createdAt         DateTime         @default(now())
 
+  @@unique([id, userId])
   @@index([userId, expiresAt])
   @@map("sessions")
 }
@@ -124,28 +145,31 @@ model Account {
 }
 
 model Workspace {
-  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String
-  slug        String            @unique
-  members     WorkspaceMember[]
-  activeSessions Session[]
-  projects    Project[]
-  deployments Deployment[]
-  auditLogs   AuditLog[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String
+  slug                String               @unique
+  members             WorkspaceMember[]
+  activeSessions      Session[]
+  projects            Project[]
+  deployments         Deployment[]
+  auditLogs           AuditLog[]
+  githubInstallations GitHubInstallation[]
+  githubAppStates     GitHubAppState[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   @@map("workspaces")
 }
 
 model WorkspaceMember {
-  workspaceId String        @db.Uuid
-  userId      String        @db.Uuid
-  role        WorkspaceRole
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  workspaceId     String           @db.Uuid
+  userId          String           @db.Uuid
+  role            WorkspaceRole
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  githubAppStates GitHubAppState[]
 
   @@id([workspaceId, userId])
   @@index([userId])
@@ -172,21 +196,77 @@ model Project {
 }
 
 model Repository {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspaceId        String   @db.Uuid
-  projectId          String   @unique @db.Uuid
-  provider           String
-  externalId         String
-  name               String
-  cloneUrlCiphertext String?
-  project            Project  @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                      String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId             String              @db.Uuid
+  projectId               String              @unique @db.Uuid
+  provider                String
+  externalId              String
+  installationId          String?             @db.Uuid
+  installationWorkspaceId String?             @db.Uuid
+  name                    String
+  fullName                String?
+  defaultBranch           String?
+  selectedBranch          String?
+  language                String?
+  isPrivate               Boolean             @default(false)
+  cloneUrlCiphertext      String?
+  project                 Project             @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
+  installation            GitHubInstallation? @relation(fields: [installationWorkspaceId, installationId], references: [workspaceId, id], onDelete: Restrict)
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 
   @@unique([workspaceId, provider, externalId])
   @@unique([workspaceId, projectId])
   @@index([workspaceId, projectId])
+  @@index([installationWorkspaceId, installationId])
   @@map("repositories")
+}
+
+model GitHubInstallation {
+  id                     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId            String                    @db.Uuid
+  installationId         BigInt                    @unique
+  githubAccountId        BigInt
+  accountLogin           String
+  accountType            String
+  repositorySelection    GitHubRepositorySelection
+  status                 GitHubInstallationStatus  @default(ACTIVE)
+  authorizedGithubUserId String
+  authorizedUserId       String                    @db.Uuid
+  installedByUserId      String                    @db.Uuid
+  suspendedAt            DateTime?
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  workspace              Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  authorizedUser         User                      @relation("GitHubInstallationAuthorizedUser", fields: [authorizedUserId], references: [id], onDelete: Restrict)
+  installedBy            User                      @relation("GitHubInstallationInstaller", fields: [installedByUserId], references: [id], onDelete: Restrict)
+  repositories           Repository[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, status, createdAt])
+  @@index([githubAccountId])
+  @@map("github_installations")
+}
+
+model GitHubAppState {
+  id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stateHash       String                @unique
+  userId          String                @db.Uuid
+  sessionId       String                @db.Uuid
+  workspaceId     String                @db.Uuid
+  purpose         GitHubAppStatePurpose
+  installationId  BigInt?
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  createdAt       DateTime              @default(now())
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session         Session               @relation(fields: [sessionId, userId], references: [id, userId], onDelete: Cascade)
+  workspaceMember WorkspaceMember       @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  workspace       Workspace             @relation(fields: [workspaceId], references: [id])
+
+  @@index([userId, purpose, expiresAt])
+  @@index([sessionId, expiresAt])
+  @@map("github_app_states")
 }
 
 model Deployment {

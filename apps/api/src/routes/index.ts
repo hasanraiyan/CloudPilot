@@ -5,6 +5,7 @@ import { healthRouter } from "./health.routes.js";
 import { githubAuthRouter } from "./github-auth.routes.js";
 import { authRouter } from "../controllers/auth.controller.js";
 import { workspaceRouter } from "../controllers/workspace.controller.js";
+import { githubAppRouter } from "../controllers/github-app.controller.js";
 
 export const routes = Router();
 
@@ -12,4 +13,5 @@ routes.get("/health", getHealth);
 routes.use(`/api/${env.API_VERSION}/health`, healthRouter);
 routes.use(`/api/${env.API_VERSION}/auth/github`, githubAuthRouter);
 routes.use(`/api/${env.API_VERSION}/auth`, authRouter);
+routes.use(`/api/${env.API_VERSION}/github`, githubAppRouter);
 routes.use(`/api/${env.API_VERSION}`, workspaceRouter);

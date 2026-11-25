@@ -19,7 +19,25 @@ const envSchema = z.object({
   GITHUB_CLIENT_ID: z.string().trim().min(1).optional(),
   GITHUB_CLIENT_SECRET: z.string().trim().min(1).optional(),
   GITHUB_CALLBACK_URL: z.string().trim().url().optional(),
+  GITHUB_APP_ID: z.string().trim().regex(/^\d+$/).optional(),
+  GITHUB_APP_SLUG: z.string().trim().regex(/^[a-zA-Z0-9-]+$/).optional(),
+  GITHUB_APP_PRIVATE_KEY_PATH: z.string().trim().min(1).optional(),
+  GITHUB_APP_CLIENT_ID: z.string().trim().min(1).optional(),
+  GITHUB_APP_CLIENT_SECRET: z.string().trim().min(1).optional(),
+  GITHUB_INSTALLATION_OAUTH_CALLBACK_URL: z.string().trim().url().optional(),
   AUTH_SECRET: z.string().trim().min(32).optional(),
+}).superRefine((values, context) => {
+  const appFields = [values.GITHUB_APP_ID, values.GITHUB_APP_SLUG, values.GITHUB_APP_PRIVATE_KEY_PATH];
+  if (appFields.some(Boolean) && !appFields.every(Boolean)) {
+    context.addIssue({ code: "custom", message: "GITHUB_APP_ID, GITHUB_APP_SLUG, and GITHUB_APP_PRIVATE_KEY_PATH must be configured together." });
+  }
+  const appOAuthFields = [values.GITHUB_APP_CLIENT_ID, values.GITHUB_APP_CLIENT_SECRET];
+  if (appOAuthFields.some(Boolean) && !appOAuthFields.every(Boolean)) {
+    context.addIssue({ code: "custom", message: "GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET must be configured together." });
+  }
+  if (appOAuthFields.every(Boolean) && !values.GITHUB_INSTALLATION_OAUTH_CALLBACK_URL) {
+    context.addIssue({ code: "custom", message: "GITHUB_INSTALLATION_OAUTH_CALLBACK_URL is required with GitHub App user authorization credentials." });
+  }
 });
 
 const parsed = envSchema.safeParse(process.env);

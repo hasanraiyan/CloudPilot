@@ -88,7 +88,7 @@ async function logsSummary(req: Request, res: Response) {
 async function listProjects(req: Request, res: Response) {
   const member = await activeWorkspace(req); if (!member) { res.json({ success: true, data: [] }); return; }
   const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 100) : "";
-  const data = await prisma.project.findMany({ where: { workspaceId: member.workspaceId, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { description: { contains: q, mode: "insensitive" } }] } : {}) }, orderBy: { updatedAt: "desc" }, include: { _count: { select: { deployments: true } } } });
+  const data = await prisma.project.findMany({ where: { workspaceId: member.workspaceId, ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { description: { contains: q, mode: "insensitive" } }] } : {}) }, orderBy: { updatedAt: "desc" }, include: { repository: { select: { fullName: true, selectedBranch: true, defaultBranch: true, language: true, isPrivate: true } }, _count: { select: { deployments: true } } } });
   res.json({ success: true, data });
 }
 async function createProject(req: Request, res: Response) {
