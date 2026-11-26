@@ -2,13 +2,18 @@
   "name": "cloudpilot",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.19.1",
   "description": "AI-Powered DevOps Automation Platform for intelligent deployment, monitoring, and self-healing infrastructure.",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run db:build && npm run queue:build && npm run worker:build && npm run build -w @cloudpilot/api && npm run build -w web",
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f",
@@ -61,5 +66,8 @@
   "bugs": {
     "url": "https://github.com/raziquehasan/CloudPilot/issues"
   },
-  "homepage": "https://github.com/raziquehasan/CloudPilot#readme"
+  "homepage": "https://github.com/raziquehasan/CloudPilot#readme",
+  "devDependencies": {
+    "turbo": "^2.11.13"
+  }
 }
