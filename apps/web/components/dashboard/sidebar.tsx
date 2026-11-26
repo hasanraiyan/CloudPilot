@@ -19,6 +19,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Brand } from "@/components/landing/brand";
+import { useAssistantUi } from "@/components/assistant/assistant-provider";
 import { useDashboard } from "./dashboard-provider";
 
 const items = [
@@ -28,7 +29,6 @@ const items = [
   ["infrastructure", "Infrastructure", Layers3],
   ["monitoring", "Monitoring", Activity],
   ["logs", "Logs", Logs],
-  ["ai-assistant", "AI Assistant", Bot],
   ["environment-variables", "Environment Variables", Variable],
   ["team", "Team", Users],
   ["settings", "Settings", Settings],
@@ -38,6 +38,7 @@ export function DashboardSidebar({ mobile = false, onNavigate }: { mobile?: bool
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const { activeWorkspace } = useDashboard();
+  const { isOpen, toggleOpen } = useAssistantUi();
 
   const compact = collapsed && !mobile;
 
@@ -69,6 +70,25 @@ export function DashboardSidebar({ mobile = false, onNavigate }: { mobile?: bool
           );
         })}
       </nav>
+      <div className="mt-3 shrink-0 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+        <button
+          type="button"
+          onClick={() => {
+            toggleOpen();
+            onNavigate?.();
+          }}
+          aria-label={isOpen ? "Hide AI Assistant" : "Open AI Assistant"}
+          title={compact ? "AI Assistant" : undefined}
+          className={`flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1 text-[12px] transition-colors ${
+            isOpen
+              ? "bg-zinc-950 font-medium text-white dark:bg-white dark:text-zinc-950"
+              : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"
+          } ${compact ? "justify-center" : ""}`}
+        >
+          <Bot className="size-4 shrink-0" />
+          {(!collapsed || mobile) && <span className="min-w-0 truncate">Ask Assistant</span>}
+        </button>
+      </div>
     </aside>
   );
 }

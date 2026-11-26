@@ -4,7 +4,7 @@
   "description": "CloudPilot Backend API",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "node --watch-path=src --import tsx src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
@@ -19,8 +19,12 @@
   "dependencies": {
     "@cloudpilot/database": "*",
     "@cloudpilot/queue": "*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@octokit/app": "^16.1.4",
     "@octokit/rest": "^22.0.1",
+    "@personaai/adapters": "^0.18.0",
+    "@personaai/runtime": "^0.27.0",
+    "@personaai/sdk": "^0.32.0",
     "argon2": "^0.45.2",
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",

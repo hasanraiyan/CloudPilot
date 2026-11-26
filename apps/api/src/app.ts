@@ -11,6 +11,9 @@ import { errorMiddleware } from "./middlewares/error.middleware.js";
 import { notFoundMiddleware } from "./middlewares/not-found.middleware.js";
 import { apiRateLimiter } from "./middlewares/rate-limit.middleware.js";
 import { requestIdMiddleware } from "./middlewares/request-id.middleware.js";
+import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { cloudpilotOAuthProvider } from "./assistant/mcp/oauth-provider.js";
+import { mcpIssuerUrl, mcpRouter, mcpServerUrl } from "./assistant/mcp/server.js";
 import { routes } from "./routes/index.js";
 import { ApiError } from "./utils/api-error.js";
 
@@ -52,6 +55,16 @@ export function createApp(): express.Express {
   app.use(cookieParser());
   app.use(compression());
   app.use(apiRateLimiter);
+  app.use(
+    mcpAuthRouter({
+      provider: cloudpilotOAuthProvider,
+      issuerUrl: mcpIssuerUrl(),
+      resourceServerUrl: mcpServerUrl(),
+      resourceName: "CloudPilot MCP",
+      scopesSupported: ["cloudpilot:read"],
+    }),
+  );
+  app.use(mcpRouter);
   app.use(routes);
 
   app.use(notFoundMiddleware);
