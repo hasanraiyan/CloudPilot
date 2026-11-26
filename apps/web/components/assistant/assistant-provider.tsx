@@ -25,6 +25,7 @@ type AssistantUiContextValue = {
   setActiveThreadId: (id: string | undefined) => void;
   configured: boolean;
   agentId: string | null;
+  imageInputEnabled: boolean;
   tools: string[];
 };
 
@@ -38,8 +39,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<{
     configured: boolean;
     agentId: string | null;
+    imageInputEnabled: boolean;
     tools: string[];
-  }>({ configured: false, agentId: null, tools: [] });
+  }>({ configured: false, agentId: null, imageInputEnabled: false, tools: [] });
 
   useEffect(() => {
     try {
@@ -56,11 +58,12 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     fetch("/api/assistant/config", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
-      .then((payload: { data?: { configured?: boolean; agentId?: string | null; tools?: string[] } } | null) => {
+      .then((payload: { data?: { configured?: boolean; agentId?: string | null; imageInputEnabled?: boolean; tools?: string[] } } | null) => {
         if (cancelled || !payload?.data) return;
         setConfig({
           configured: Boolean(payload.data.configured),
           agentId: payload.data.agentId ?? null,
+          imageInputEnabled: Boolean(payload.data.imageInputEnabled),
           tools: Array.isArray(payload.data.tools) ? payload.data.tools : [],
         });
       })
@@ -98,6 +101,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       setActiveThreadId,
       configured: config.configured,
       agentId: config.agentId,
+      imageInputEnabled: config.imageInputEnabled,
       tools: config.tools,
     }),
     [isOpen, toggleOpen, layoutMode, setLayoutMode, toggleLayoutMode, activeThreadId, config],

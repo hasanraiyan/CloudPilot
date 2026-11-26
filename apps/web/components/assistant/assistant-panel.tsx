@@ -211,6 +211,7 @@ export function AssistantPanel({ variant = "compact" }: { variant?: "compact" | 
     setActiveThreadId,
     configured,
     agentId,
+    imageInputEnabled: configImageInputEnabled,
   } = useAssistantUi();
 
   const [showThreads, setShowThreads] = useState(variant === "full");
@@ -234,7 +235,7 @@ export function AssistantPanel({ variant = "compact" }: { variant?: "compact" | 
 
   const { agents } = useAgents(configured);
   const activeAgent = agents.find((a) => a._id === agentId);
-  const imageInputEnabled = Boolean(activeAgent?.imageInputEnabled);
+  const imageInputEnabled = configImageInputEnabled || Boolean(activeAgent?.imageInputEnabled);
 
   const {
     attachments,
