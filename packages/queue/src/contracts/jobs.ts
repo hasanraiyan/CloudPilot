@@ -9,16 +9,17 @@ export const diagnosticJobSchema = z.object({
   transientFailureOnce: z.boolean().optional(),
   permanentFailure: z.boolean().optional(),
   blockForMs: z.number().int().min(1).max(30000).optional(),
-});
+}).strict();
 
 export const deploymentJobSchema = z.object({
   kind: z.literal("deployment"),
   workspaceId: z.uuid(),
   projectId: z.uuid(),
   deploymentId: z.uuid(),
+  eventId: z.uuid(),
   correlationId: identifierSchema,
   idempotencyKey: identifierSchema,
-});
+}).strict();
 
 export const buildJobSchema = z.object({
   kind: z.literal("build"),
@@ -27,7 +28,7 @@ export const buildJobSchema = z.object({
   deploymentId: z.uuid(),
   buildId: z.uuid(),
   correlationId: identifierSchema,
-});
+}).strict();
 
 export const rollbackJobSchema = z.object({
   kind: z.literal("rollback"),
@@ -37,7 +38,7 @@ export const rollbackJobSchema = z.object({
   rollbackOfId: z.uuid(),
   correlationId: identifierSchema,
   idempotencyKey: identifierSchema,
-});
+}).strict();
 
 export const queueJobSchema = z.discriminatedUnion("kind", [
   diagnosticJobSchema,

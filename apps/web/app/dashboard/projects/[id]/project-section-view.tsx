@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { GitHubIcon } from "@/components/shared/github-icon";
+import { apiFetch } from "@/lib/api";
 import type { Project, ProjectDeployment } from "./project-types";
 import { useDashboard } from "@/components/dashboard/dashboard-provider";
 import { useBuildConfiguration, useBranches, useChangeProjectBranch, useCommitDetail, useCommits, useLatestCommit, useRefreshRepository, useRepository, useRepositoryDetection, useRepositoryFiles, useRepositoryLanguages, useResetBuildConfiguration, useSaveBuildConfiguration, type BuildConfiguration, type Commit, type RepositoryDetection } from "@/lib/repository-intelligence";
@@ -65,17 +66,41 @@ function Timestamp({ value, relative = false }: { value: string; relative?: bool
   return <time dateTime={value} title={exact}>{label}</time>;
 }
 
-function Readiness({ project, branch, branchStatus, framework, saved, configPending }: {
+interface ProjectDeploymentReadiness {
+  deploymentQueue: { available: boolean };
+  workers: { deployment: { connected: boolean; available: boolean } };
+  repository: { connected: boolean };
+  buildConfiguration: { configured: boolean };
+  execution: { capabilitiesAvailable: boolean; available: boolean };
+}
+
+function Readiness({ project, workspaceId, branch, branchStatus, framework, saved, configPending }: {
+  workspaceId?: string;
   project: Project; branch: string; branchStatus: string;
   framework?: string | null; saved?: boolean; configPending: boolean;
 }) {
+  const [readiness, setReadiness] = useState<ProjectDeploymentReadiness | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(true);
+  useEffect(() => {
+    let active = true;
+    setReadinessLoading(true);
+    void apiFetch<ProjectDeploymentReadiness>(`/projects/${encodeURIComponent(project.id)}/deployment-readiness`)
+      .then((result) => { if (active) setReadiness(result); })
+      .catch(() => { if (active) setReadiness(null); })
+      .finally(() => { if (active) setReadinessLoading(false); });
+    return () => { active = false; };
+  }, [project.id, workspaceId]);
+
   const rows = [
-    { label: "Repository", value: project.repository?.fullName ?? "Connect a GitHub repository", ready: Boolean(project.repository) },
+    { label: "Repository connection", value: readinessLoading ? "Checking connection" : readiness?.repository.connected ? "Connected" : "Not connected", ready: readiness?.repository.connected ?? false },
     { label: "Selected branch", value: branchStatus === "success" ? branch : branchStatus === "error" ? "Repository access failed" : branchStatus === "missing" ? "No commit available on this branch" : branch ? "Checking access" : "Select a branch", ready: branchStatus === "success" },
     { label: "Framework", value: framework ?? "Detect or configure a framework", ready: Boolean(framework) },
-    { label: "Build configuration", value: saved ? "Saved" : configPending ? "Checking configuration" : "Save build settings", ready: Boolean(saved) },
+    { label: "Build configuration", value: readinessLoading ? (configPending ? "Checking configuration" : "Checking readiness") : readiness?.buildConfiguration.configured ? "Configured" : saved ? "Saved but incomplete" : "Missing or incomplete", ready: readiness?.buildConfiguration.configured ?? false },
     { label: "Environment variables", value: project._count.environmentVariables ? `${project._count.environmentVariables} configured · review application requirements` : "Configure only if your application requires them", ready: null },
-    { label: "Deployment engine", value: "Required to enable Deploy", ready: false },
+    { label: "Deployment queue", value: readinessLoading ? "Checking availability" : readiness?.deploymentQueue.available ? "Available" : "Unavailable", ready: readiness?.deploymentQueue.available ?? false },
+    { label: "Deployment worker", value: readinessLoading ? "Checking connection" : readiness?.workers.deployment.connected ? readiness.workers.deployment.available ? "Connected and available" : "Connected but unavailable" : "Disconnected", ready: readiness?.workers.deployment.available ?? false },
+    { label: "Deployment engine", value: readinessLoading ? "Checking capabilities" : readiness?.execution.capabilitiesAvailable ? "Configured" : "Not configured", ready: readiness?.execution.capabilitiesAvailable ?? false },
+    { label: "Execution capability", value: readinessLoading ? "Checking availability" : readiness?.execution.available ? "Available" : "Unavailable", ready: readiness?.execution.available ?? false },
   ];
   return <Card size="sm">
     <CardHeader className="border-b"><CardTitle className="text-sm">Deployment readiness</CardTitle></CardHeader>
@@ -153,7 +178,7 @@ function Overview({ project }: { project: Project }) {
           </div>
         </CardContent>
       </Card>}
-      <Readiness project={project} branch={branch} branchStatus={latest.isSuccess && !latest.data ? "missing" : latest.status} framework={build.data?.configuration?.framework ?? detection.data?.primaryFramework} saved={build.data?.saved} configPending={build.isPending} />
+      <Readiness project={project} workspaceId={workspaceId} branch={branch} branchStatus={latest.isSuccess && !latest.data ? "missing" : latest.status} framework={build.data?.configuration?.framework ?? detection.data?.primaryFramework} saved={build.data?.saved} configPending={build.isPending} />
     </div>
     <Card size="sm">
       <CardHeader className="border-b"><CardTitle className="text-sm">Deployment activity</CardTitle></CardHeader>

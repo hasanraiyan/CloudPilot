@@ -18,10 +18,17 @@ enum WorkspaceRole {
 enum DeploymentStatus {
   QUEUED
   PENDING
+  PREPARING
+  CLONING
+  BUILDING
+  DEPLOYING
+  HEALTH_CHECKING
   RUNNING
   SUCCEEDED
   FAILED
+  CANCELLING
   CANCELLED
+  STOPPED
   ROLLED_BACK
 }
 
@@ -88,6 +95,17 @@ enum DeploymentFailureCode {
   UNKNOWN
 }
 
+enum DeploymentOutboxStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  DEAD
+}
+
+enum DeploymentOutboxEventType {
+  DEPLOYMENT_REQUESTED
+}
+
 model User {
   id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email               String               @unique
@@ -100,6 +118,7 @@ model User {
   githubInstallations GitHubInstallation[] @relation("GitHubInstallationAuthorizedUser")
   githubAppsInstalled GitHubInstallation[] @relation("GitHubInstallationInstaller")
   githubAppStates     GitHubAppState[]
+  triggeredDeployments Deployment[]        @relation("DeploymentTriggeredBy")
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -152,6 +171,7 @@ model Workspace {
   activeSessions      Session[]
   projects            Project[]
   deployments         Deployment[]
+  deploymentOutboxEvents DeploymentOutboxEvent[]
   auditLogs           AuditLog[]
   githubInstallations GitHubInstallation[]
   createdAt           DateTime             @default(now())
@@ -185,6 +205,7 @@ model Project {
   buildConfiguration   ProjectBuildConfiguration?
   deployments          Deployment[]
   environmentVariables EnvironmentVariable[]
+  deploymentOutboxEvents DeploymentOutboxEvent[]
   workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
@@ -315,12 +336,26 @@ model Deployment {
   gitRef         String?
   commitSha      String?
   rollbackOfId   String?                 @db.Uuid
+  previousDeploymentId       String?                 @db.Uuid
+  requestedBranch            String?                 @db.VarChar(255)
+  commitMessage              String?                 @db.Text
+  triggeredByUserId          String?                 @db.Uuid
+  buildConfigurationSnapshot Json?
+  queueJobId                 String?                 @unique @db.VarChar(128)
+  failureMessage             String?                 @db.Text
+  executionLeaseToken        String?                 @db.Uuid
+  executionLeaseExpiresAt    DateTime?
+  executionAttempt           Int                     @default(0)
   workspace      Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project        Project                 @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
   rollbackOf     Deployment?             @relation("DeploymentRollback", fields: [workspaceId, projectId, rollbackOfId], references: [workspaceId, projectId, id], onDelete: Restrict)
   rollbacks      Deployment[]            @relation("DeploymentRollback")
+  previousDeployment Deployment?         @relation("DeploymentPrevious", fields: [workspaceId, projectId, previousDeploymentId], references: [workspaceId, projectId, id], onDelete: Restrict)
+  subsequentDeployments Deployment[]     @relation("DeploymentPrevious")
+  triggeredBy    User?                    @relation("DeploymentTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
   builds         Build[]
   logs           DeploymentLog[]
+  outboxEvents   DeploymentOutboxEvent[]
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
   startedAt      DateTime?
@@ -332,7 +367,37 @@ model Deployment {
   @@index([workspaceId, projectId, createdAt])
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, environment, createdAt])
+  @@index([workspaceId, projectId, status, createdAt])
+  @@index([status, executionLeaseExpiresAt])
+  @@index([workspaceId, triggeredByUserId, createdAt])
   @@map("deployments")
+}
+
+model DeploymentOutboxEvent {
+  id              String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String                       @db.Uuid
+  projectId       String                       @db.Uuid
+  deploymentId   String                       @db.Uuid
+  eventType       DeploymentOutboxEventType
+  status          DeploymentOutboxStatus       @default(PENDING)
+  jobId           String                       @unique @db.VarChar(128)
+  attemptCount    Int                          @default(0)
+  nextAttemptAt   DateTime                     @default(now())
+  leaseToken      String?                      @db.Uuid
+  leaseExpiresAt  DateTime?
+  publishedAt     DateTime?
+  lastErrorCode   String?                      @db.VarChar(80)
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  workspace       Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project         Project                      @relation(fields: [workspaceId, projectId], references: [workspaceId, id], onDelete: Cascade)
+  deployment      Deployment                   @relation(fields: [workspaceId, projectId, deploymentId], references: [workspaceId, projectId, id], onDelete: Cascade)
+
+  @@unique([workspaceId, projectId, deploymentId, eventType])
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@index([workspaceId, projectId, createdAt])
+  @@map("deployment_outbox_events")
 }
 
 model Build {

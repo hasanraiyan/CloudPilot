@@ -10,6 +10,7 @@ export interface QueuePolicy {
   completedRetention: number;
   failedRetention: number;
   executionTimeoutMs: number;
+  backoffJitter?: number;
 }
 
 export class TransientJobError extends Error {
@@ -35,6 +36,7 @@ export class QueueManager {
       executionTimeoutMs: 30000,
     },
     private readonly closeConnections = false,
+    private readonly prefix = "cloudpilot",
   ) {
     this.validatePolicy();
   }
@@ -54,6 +56,12 @@ export class QueueManager {
     }
     if (!Number.isInteger(this.policy.executionTimeoutMs) || this.policy.executionTimeoutMs < 100 || this.policy.executionTimeoutMs > 3600000) {
       throw new Error("Execution timeout must be an integer between 100 and 3600000 ms");
+    }
+    if (this.policy.backoffJitter !== undefined && (!Number.isFinite(this.policy.backoffJitter) || this.policy.backoffJitter < 0 || this.policy.backoffJitter > 1)) {
+      throw new Error("Queue backoff jitter must be between 0 and 1");
+    }
+    if (!/^[A-Za-z0-9_-]{1,128}$/u.test(this.prefix)) {
+      throw new Error("Queue prefix must contain only letters, numbers, '_' or '-'");
     }
   }
 
@@ -77,21 +85,13 @@ export class QueueManager {
   }
 
   static validatePayload(name: QueueName, payload: unknown): QueueJob {
-    const schema =
-      name === "deployment"
-        ? queuePayloadSchemas.deployment
-        : name === "build"
-          ? queuePayloadSchemas.build
-          : name === "rollback"
-            ? queuePayloadSchemas.rollback
-            : queuePayloadSchemas.diagnostic;
-    return schema.parse(payload) as QueueJob;
+    return queuePayloadSchemas[name].parse(payload);
   }
 
   getQueue(name: QueueName): Queue<QueueJob> {
     const existing = this.queues[name];
     if (existing) return existing;
-    const queue = new Queue<QueueJob>(name, { connection: this.producerConnection });
+    const queue = new Queue<QueueJob>(name, { connection: this.producerConnection, prefix: this.prefix });
     this.queues[name] = queue;
     return queue;
   }
@@ -102,13 +102,13 @@ export class QueueManager {
     const attempts =
       parsed.kind === "diagnostic" && parsed.permanentFailure
         ? 1
-        : parsed.kind === "diagnostic"
+        : parsed.kind === "diagnostic" || parsed.kind === "deployment"
           ? this.policy.attempts
           : 1;
     return this.getQueue(name).add(name, parsed, {
       jobId: validatedJobId,
       attempts,
-      backoff: { type: "exponential", delay: this.policy.backoffMs },
+      backoff: { type: "exponential", delay: this.policy.backoffMs, jitter: this.policy.backoffJitter ?? 0.25 },
       removeOnComplete: { count: this.policy.completedRetention },
       removeOnFail: { count: this.policy.failedRetention },
     });
@@ -145,6 +145,8 @@ export class QueueManager {
       connection: this.workerConnection,
       concurrency,
       lockDuration: Math.max(30000, this.policy.executionTimeoutMs * 2),
+      prefix: this.prefix,
+      maxStalledCount: 1,
     });
     this.workers.push(worker);
     return worker;
