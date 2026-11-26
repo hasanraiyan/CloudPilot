@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import {
   QUEUE_NAMES,
   QueueManager,
   createWorkerConnection,
+  publishWorkerHeartbeat,
   type DiagnosticJob,
   type QueueJob,
   queuePayloadSchemas,
@@ -11,16 +13,52 @@ import { UnrecoverableError } from "bullmq";
 import { workerEnv } from "./config/env.js";
 import { workerLogger } from "./config/logger.js";
 import { processDiagnosticJob } from "./processors/diagnostic.processor.js";
+import { processDeploymentJob } from "./processors/deployment.processor.js";
 
 const workerConnection = createWorkerConnection(workerEnv.REDIS_URL);
+const workerId = `worker-${randomUUID()}`;
+const startupAt = new Date().toISOString();
+const heartbeatOptions = {
+  prefix: workerEnv.QUEUE_PREFIX,
+  ttlSeconds: workerEnv.WORKER_HEARTBEAT_TTL_SECONDS,
+};
 const queueManager = new QueueManager(workerConnection, workerConnection, {
   attempts: workerEnv.QUEUE_JOB_ATTEMPTS,
   backoffMs: workerEnv.QUEUE_BACKOFF_MS,
   completedRetention: workerEnv.QUEUE_COMPLETED_RETENTION,
   failedRetention: workerEnv.QUEUE_FAILED_RETENTION,
   executionTimeoutMs: workerEnv.QUEUE_EXECUTION_TIMEOUT_MS,
-});
+  backoffJitter: workerEnv.QUEUE_BACKOFF_JITTER,
+}, false, workerEnv.QUEUE_PREFIX);
 let shuttingDown = false;
+
+function publishHeartbeat(role: "diagnostic" | "deployment", available: boolean, draining: boolean): void {
+  const isDeploymentWorker = role === "deployment";
+  void publishWorkerHeartbeat(workerConnection, heartbeatOptions, {
+    workerId,
+    role,
+    version: "0.1.0",
+    capabilities: {
+      diagnostic: !isDeploymentWorker,
+      deploymentQueue: isDeploymentWorker,
+      sourceRetrieval: false,
+      dockerBuild: false,
+      containerExecution: false,
+    },
+    startupAt,
+    lastHeartbeatAt: new Date().toISOString(),
+    available,
+    draining,
+    concurrency: isDeploymentWorker
+      ? workerEnv.DEPLOYMENT_WORKER_CONCURRENCY
+      : workerEnv.WORKER_CONCURRENCY,
+  }).catch((error: unknown) => {
+    workerLogger.warn(
+      { role, errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Worker heartbeat update failed",
+    );
+  });
+}
 
 workerConnection.on("error", (error) => {
   workerLogger.error({ err: error }, "Worker Redis connection error");
@@ -48,6 +86,19 @@ const worker = queueManager.createWorker(
   },
   workerEnv.WORKER_CONCURRENCY,
 );
+const deploymentWorker = queueManager.createWorker(
+  QUEUE_NAMES.deployment,
+  async (job: Job<QueueJob>, _token, signal) => {
+    const parsed = queuePayloadSchemas.deployment.safeParse(job.data);
+    if (!parsed.success) {
+      throw new UnrecoverableError(
+        `Invalid deployment job payload: ${parsed.error.issues.map((issue) => issue.path.join(".")).join(", ")}`,
+      );
+    }
+    return processDeploymentJob(job, parsed.data, signal ?? new AbortController().signal);
+  },
+  workerEnv.DEPLOYMENT_WORKER_CONCURRENCY,
+);
 
 worker.on("completed", (job) => {
   workerLogger.info({ jobId: job.id, queue: QUEUE_NAMES.diagnostic }, "Job completed");
@@ -68,10 +119,41 @@ worker.on("error", (error) => {
   workerLogger.error({ err: error }, "Worker error");
 });
 
+deploymentWorker.on("completed", (job) => {
+  workerLogger.info({ jobId: job.id, queue: QUEUE_NAMES.deployment }, "Deployment infrastructure job completed");
+});
+
+deploymentWorker.on("failed", (job, error) => {
+  workerLogger.warn(
+    { jobId: job?.id, queue: QUEUE_NAMES.deployment, errorName: error.name },
+    "Deployment infrastructure job failed",
+  );
+});
+
+deploymentWorker.on("stalled", (jobId) => {
+  workerLogger.warn({ jobId, queue: QUEUE_NAMES.deployment }, "Deployment job stalled");
+});
+
+deploymentWorker.on("error", (error) => {
+  workerLogger.error({ err: error }, "Deployment worker error");
+});
+
+publishHeartbeat("diagnostic", true, false);
+publishHeartbeat("deployment", true, false);
+const heartbeatTimer = setInterval(() => {
+  const available = workerConnection.status === "ready" && !shuttingDown;
+  publishHeartbeat("diagnostic", available, shuttingDown);
+  publishHeartbeat("deployment", available, shuttingDown);
+}, workerEnv.WORKER_HEARTBEAT_INTERVAL_MS);
+heartbeatTimer.unref();
+
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   workerLogger.info({ signal }, "Worker graceful shutdown started");
+  clearInterval(heartbeatTimer);
+  publishHeartbeat("diagnostic", false, true);
+  publishHeartbeat("deployment", false, true);
 
   const timeout = setTimeout(() => {
     workerLogger.error({ signal }, "Worker graceful shutdown timeout exceeded");

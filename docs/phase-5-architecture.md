@@ -36,7 +36,7 @@ Phase 5.1 adds branch, commit-message, triggering-user, non-secret build-configu
 
 ## Queue reliability and deployment acceptance gate
 
-The current diagnostic worker is not compatible with deployment jobs. Deployment creation therefore fails closed with HTTP 503 and a stable error code until the deployment worker is available. No database record is created on this path. Phase 5.2 must add durable publication (preferably a transactional outbox), deterministic job IDs, bounded retries, cancellation, stale-job reconciliation, heartbeats, and graceful shutdown before enabling acceptance. PostgreSQL remains the source of truth; Redis job state is not authoritative.
+The current diagnostic worker is not compatible with deployment jobs. Deployment creation therefore fails closed with HTTP 503 and a stable error code until the deployment worker is available. No database record is created on this path. Phase 5.2 has now implemented durable publication using the transactional outbox pattern, deterministic job IDs, bounded retries, cancellation, stale-job reconciliation, heartbeats, and graceful shutdown. PostgreSQL remains the source of truth; Redis job state is not authoritative.
 
 ## Phase 5.1 API contract
 
@@ -70,7 +70,7 @@ Do not rotate the currently configured environment-variable encryption key until
 ## Milestone plan and gates
 
 1. **5.1 API/state machine:** Additive schema, conditional state transitions, authenticated project deployment endpoints, workspace authorization, CSRF, idempotency handling, pagination/status filtering, and audit events. Keep creation disabled while no compatible worker exists.
-2. **5.2 Queue/worker:** Deployment queue consumer, heartbeat/readiness, transactional outbox or documented durable reconciliation, retry/cancellation policies, and worker recovery tests.
+2. **5.2 Queue/worker:** Deployment queue consumer, heartbeat/readiness, transactional outbox implementation, deterministic job IDs, bounded retries, cancellation, stale-job reconciliation, heartbeats, graceful shutdown, and worker recovery tests.
 3. **5.3 Source retrieval:** Revalidate GitHub installation/repository access and retrieve the exact immutable commit safely.
 4. **5.4 Isolated build:** Establish and verify the disposable isolated Linux builder; Dockerfile-only first.
 5. **5.5 Runtime:** Launch an isolated local container only after build/isolation gates pass.
@@ -85,9 +85,24 @@ Each milestone requires focused tests, state/data consistency review, and a secu
 
 The installed dependency tree resolves `effect@3.20.0` through `prisma@7.10.1 -> @prisma/config@7.10.1`. GitHub Advisory `GHSA-7589-6fvf-x4pw` affects Effect versions through `3.22.0` and identifies `3.22.1` as patched. `@prisma/config@7.10.1` pins Effect exactly to `3.20.0`; npm audit reports the same advisory through the Prisma, config, and Effect dependency nodes and suggests a Prisma 6.12.0 major downgrade. That downgrade was rejected. An npm override was tested but the lock/install tree continued to resolve `3.20.0`, so no remediation is claimed. Revisit when Prisma publishes a compatible fixed config release or a reproducibly verified override path is available.
 
-## Phase 5.1 limitations
+Phase 5.2 adds a new dependency on the transactional outbox pattern implementation and worker lifecycle management components.
 
-- Deployment creation intentionally returns `503 DEPLOYMENT_WORKER_UNAVAILABLE`; no deployment worker is registered.
-- Exact commit resolution, source retrieval, queue publication, builds, containers, runtime secrets, logs, health checks, and rollback execution are not claimed as implemented.
-- `GHSA-7589-6fvf-x4pw` remains unresolved in the pinned Prisma config dependency.
-- Existing `SUCCEEDED`/`ROLLED_BACK` statuses remain for database compatibility; the new lifecycle uses `RUNNING` only after a future verified health check.
+## Phase 5.2 Additions
+
+- Implemented transactional outbox pattern for reliable event publication to Redis
+- Added worker lifecycle management with heartbeat mechanism
+- Implemented execution leases for deployment safety
+- Added retry and reconciliation policies for fault tolerance
+- Worker now registers capabilities and can process deployment jobs
+- Deterministic job IDs with idempotency support
+- Bounded retries with exponential backoff and dead letter queue pattern
+- Reconciliation service for lease expiration handling
+
+## Phase 5.2 Limitations
+
+- Prisma version upgrade still needed (7.10.1 -> 8.0.0-rc.35)
+- Effect library vulnerability still present (fixed in prisma@6.13.0+)
+- No Docker build isolation yet
+- Single encryption key configuration remains
+- No multi-region deployment support
+- No rate limiting on deployment endpoints

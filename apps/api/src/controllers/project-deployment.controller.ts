@@ -1,4 +1,4 @@
-import { Prisma, prisma } from "@cloudpilot/database";
+import { prisma } from "@cloudpilot/database";
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { requireAuth, requireCsrf } from "../middlewares/auth.middleware.js";
@@ -14,9 +14,10 @@ import {
   idempotencyKeySchema,
 } from "../validators/deployment.validator.js";
 import {
-  InvalidDeploymentTransitionError,
-  transitionDeployment,
-} from "../services/deployment-lifecycle.service.js";
+  getDeploymentReadiness,
+} from "../services/deployment-readiness.service.js";
+import { removeQueuedDeploymentJob } from "../services/queue-producer.js";
+import { logger } from "../config/logger.js";
 
 const deploymentSelect = {
   id: true,
@@ -47,6 +48,14 @@ async function createDeployment(req: Request, res: Response): Promise<void> {
   if (!canManage(scope.role)) {
     sendError(res, 403, "FORBIDDEN", "Workspace administrator access required to deploy this project.");
     return;
+  }
+
+  async function getReadiness(req: Request, res: Response): Promise<void> {
+    res.set("Cache-Control", "no-store");
+    const scope = await resolveProject(req, res);
+    if (!scope) return;
+    const readiness = await getDeploymentReadiness(scope.workspaceId, scope.projectId);
+    res.json({ success: true, data: readiness });
   }
 
   const request = createDeploymentSchema.safeParse(req.body);
@@ -84,6 +93,14 @@ async function createDeployment(req: Request, res: Response): Promise<void> {
     "DEPLOYMENT_WORKER_UNAVAILABLE",
     "Deployment creation is disabled because no compatible deployment worker is registered.",
   );
+}
+
+async function getReadiness(req: Request, res: Response): Promise<void> {
+  res.set("Cache-Control", "no-store");
+  const scope = await resolveProject(req, res);
+  if (!scope) return;
+  const readiness = await getDeploymentReadiness(scope.workspaceId, scope.projectId);
+  res.json({ success: true, data: readiness });
 }
 
 async function listDeployments(req: Request, res: Response): Promise<void> {
@@ -162,56 +179,102 @@ async function cancelDeployment(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const deployment = await prisma.deployment.findFirst({
-    where: {
-      id: deploymentId.data,
-      workspaceId: scope.workspaceId,
-      projectId: scope.projectId,
-    },
-    select: { status: true },
+  const result = await prisma.$transaction(async (tx) => {
+    const current = await tx.deployment.findFirst({
+      where: {
+        id: deploymentId.data,
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+      },
+      select: { status: true, queueJobId: true },
+    });
+    if (!current) return { kind: "not_found" as const };
+    const queued = current.status === "QUEUED" || current.status === "PENDING";
+    if (!queued && current.status !== "PREPARING") return { kind: "conflict" as const };
+    const nextStatus = queued ? "CANCELLED" : "CANCELLING";
+    const now = new Date();
+    const updated = await tx.deployment.updateMany({
+      where: {
+        id: deploymentId.data,
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        status: current.status,
+      },
+      data: {
+        status: nextStatus,
+        failureCode: "CANCELLED",
+        failureMessage: queued
+          ? "Deployment was cancelled by a workspace administrator."
+          : "Cancellation was requested; the worker will stop cooperatively.",
+        ...(queued ? {
+          finishedAt: now,
+          executionLeaseToken: null,
+          executionLeaseExpiresAt: null,
+        } : {}),
+      },
+    });
+    if (updated.count !== 1) return { kind: "conflict" as const };
+    if (queued) {
+      await tx.deploymentOutboxEvent.updateMany({
+        where: {
+          workspaceId: scope.workspaceId,
+          projectId: scope.projectId,
+          deploymentId: deploymentId.data,
+          status: { in: ["PENDING", "PUBLISHING"] },
+        },
+        data: {
+          status: "DEAD",
+          leaseToken: null,
+          leaseExpiresAt: null,
+          lastErrorCode: "DEPLOYMENT_CANCELLED",
+        },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        workspaceId: scope.workspaceId,
+        actorId: req.userId!,
+        action: "DEPLOYMENT_CANCELLATION_REQUESTED",
+        entityType: "Deployment",
+        entityId: deploymentId.data,
+        metadata: { from: current.status, to: nextStatus },
+      },
+    });
+    const deployment = await tx.deployment.findFirst({
+      where: {
+        id: deploymentId.data,
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+      },
+      select: deploymentSelect,
+    });
+    return { kind: "updated" as const, deployment, queued, queueJobId: current.queueJobId };
   });
-  if (!deployment) {
+  if (result.kind === "not_found") {
     sendError(res, 404, "DEPLOYMENT_NOT_FOUND", "Deployment not found in this project.");
     return;
   }
-  if (deployment.status !== "QUEUED" && deployment.status !== "PENDING") {
-    sendError(res, 409, "DEPLOYMENT_NOT_CANCELLABLE", "Only queued deployments can be cancelled in this phase.");
+  if (result.kind === "conflict" || !result.deployment) {
+    sendError(res, 409, "DEPLOYMENT_STATE_CONFLICT", "Deployment state changed or is not cancellable.");
     return;
   }
-
-  try {
-    const updated = await prisma.$transaction((tx) =>
-      transitionDeployment(tx, {
-        deploymentId: deploymentId.data,
-        workspaceId: scope.workspaceId,
-        actorId: req.userId!,
-        from: deployment.status,
-        to: "CANCELLED",
-        failureCode: "CANCELLED",
-        failureMessage: "Deployment was cancelled by a workspace administrator.",
-      }),
-    );
-    if (!updated) {
-      sendError(res, 409, "DEPLOYMENT_STATE_CONFLICT", "Deployment state changed; refresh and try again.");
-      return;
+  if (result.queued && result.queueJobId) {
+    try {
+      await removeQueuedDeploymentJob(result.queueJobId);
+    } catch (error) {
+      logger.warn(
+        { deploymentId: deploymentId.data, errorName: error instanceof Error ? error.name : "UnknownError" },
+        "Queued deployment job removal deferred to reconciliation",
+      );
     }
-    res.json({ success: true, data: updated });
-  } catch (error) {
-    if (error instanceof InvalidDeploymentTransitionError) {
-      sendError(res, 409, "DEPLOYMENT_STATE_CONFLICT", "Deployment state changed; refresh and try again.");
-      return;
-    }
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-      sendError(res, 404, "DEPLOYMENT_NOT_FOUND", "Deployment not found in this project.");
-      return;
-    }
-    throw error;
   }
+  res.json({ success: true, data: result.deployment });
 }
 
 export const projectDeploymentRouter = Router();
 projectDeploymentRouter.use(requireAuth);
 projectDeploymentRouter.post("/:projectId/deployments", requireCsrf, createDeployment);
+projectDeploymentRouter.get("/:projectId/deployment-readiness", getReadiness);
 projectDeploymentRouter.get("/:projectId/deployments", listDeployments);
 projectDeploymentRouter.get("/:projectId/deployments/:deploymentId", getDeployment);
 projectDeploymentRouter.post("/:projectId/deployments/:deploymentId/cancel", requireCsrf, cancelDeployment);

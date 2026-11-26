@@ -1,17 +1,14 @@
 import { Redis as IORedis } from "ioredis";
 import { Queue } from "bullmq";
-import { readFileSync } from "node:fs";
+import { config } from "dotenv";
+import { fileURLToPath } from "node:url";
+import { parseQueueEnv } from "./config/env.js";
 
-const envText = readFileSync("../../.env", "utf8");
-const redisUrl = envText
-  .split(/\r?\n/)
-  .find((line) => line.startsWith("REDIS_URL="))
-  ?.slice("REDIS_URL=".length);
+config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
+const queueEnv = parseQueueEnv();
 
-if (!redisUrl) throw new Error("REDIS_URL is unavailable");
-
-const connection = new IORedis(redisUrl, { maxRetriesPerRequest: 1 });
-const queue = new Queue("diagnostic", { connection });
+const connection = new IORedis(queueEnv.REDIS_URL, { maxRetriesPerRequest: 1 });
+const queue = new Queue("diagnostic", { connection, prefix: queueEnv.QUEUE_PREFIX });
 const suffix = `${Date.now()}`;
 
 const jobs = [
