@@ -2,6 +2,9 @@
 
 import {
   buildMessageTimeline,
+  useAgents,
+  useAttachmentUrl,
+  useAttachments,
   useChat,
   useFeedback,
   useMcpConnections,
@@ -104,6 +107,26 @@ function MessageFeedbackButtons({
   );
 }
 
+function MessageAttachmentThumbnail({ fileId }: { fileId: string }) {
+  const { url, isLoading, error } = useAttachmentUrl(fileId);
+  if (isLoading) {
+    return <div className="size-20 animate-pulse rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900" />;
+  }
+  if (error || !url) {
+    return (
+      <div className="grid size-20 place-items-center rounded-lg border border-red-200 bg-red-50 p-1 text-center text-[10px] text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+        Image unavailable
+      </div>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt="Attached image" className="size-20 object-cover" />
+    </a>
+  );
+}
+
 function MessageBubble({
   message,
   reasoningPhases,
@@ -127,10 +150,19 @@ function MessageBubble({
 
   if (isUser) {
     return (
-      <div className="group/msg flex flex-col items-end gap-1">
-        <div className="max-w-[90%] rounded-xl bg-zinc-950 px-3.5 py-2.5 text-[13px] leading-relaxed text-white dark:bg-zinc-100 dark:text-zinc-950">
-          <div className="whitespace-pre-wrap break-words">{message.content}</div>
-        </div>
+      <div className="group/msg flex flex-col items-end gap-1.5">
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {message.attachments.map((att) => (
+              <MessageAttachmentThumbnail key={att.fileId} fileId={att.fileId} />
+            ))}
+          </div>
+        )}
+        {message.content && (
+          <div className="max-w-[90%] rounded-xl bg-zinc-950 px-3.5 py-2.5 text-[13px] leading-relaxed text-white dark:bg-zinc-100 dark:text-zinc-950">
+            <div className="whitespace-pre-wrap break-words">{message.content}</div>
+          </div>
+        )}
       </div>
     );
   }
@@ -200,6 +232,20 @@ export function AssistantPanel({ variant = "compact" }: { variant?: "compact" | 
     autoFetch: configured,
   });
 
+  const { agents } = useAgents(configured);
+  const activeAgent = agents.find((a) => a._id === agentId);
+  const imageInputEnabled = Boolean(activeAgent?.imageInputEnabled);
+
+  const {
+    attachments,
+    add: addAttachments,
+    remove: removeAttachment,
+    clear: clearAttachments,
+    ready: readyAttachments,
+    isUploading: isUploadingAttachments,
+    error: attachmentError,
+  } = useAttachments({ agentId: agentId ?? undefined });
+
   const { rate, ratings, pending: feedbackPending } = useFeedback();
 
   const handleRate = (runId: string, score: PersonaFeedbackScore) => {
@@ -257,9 +303,12 @@ export function AssistantPanel({ variant = "compact" }: { variant?: "compact" | 
 
   const handleSubmit = async () => {
     const trimmed = input.trim();
-    if (!trimmed || isLoading || !configured) return;
+    if (isLoading || !configured || isUploadingAttachments) return;
+    if (!trimmed && (!imageInputEnabled || readyAttachments.length === 0)) return;
+    const attachmentsToSend = imageInputEnabled && readyAttachments.length > 0 ? readyAttachments : undefined;
     setInput("");
-    await sendMessage(trimmed);
+    clearAttachments();
+    await sendMessage(trimmed, attachmentsToSend ? { attachments: attachmentsToSend } : undefined);
   };
 
   const groupedMessages = groupReasoning(messages);
@@ -281,7 +330,7 @@ export function AssistantPanel({ variant = "compact" }: { variant?: "compact" | 
         </div>
 
         <div className="flex items-center gap-1">
-          {configured && (
+          {configured && connections.length > 0 && (
             <button
               type="button"
               onClick={() => setShowConnections(true)}
@@ -420,6 +469,12 @@ export function AssistantPanel({ variant = "compact" }: { variant?: "compact" | 
               onStop={stop}
               isStreaming={isLoading}
               disabled={!configured}
+              imageInput={imageInputEnabled}
+              attachments={attachments}
+              onAddAttachments={addAttachments}
+              onRemoveAttachment={removeAttachment}
+              isUploadingAttachments={isUploadingAttachments}
+              attachmentError={attachmentError}
               placeholder={
                 configured
                   ? "Ask about projects, builds, deployments…"
@@ -429,14 +484,16 @@ export function AssistantPanel({ variant = "compact" }: { variant?: "compact" | 
           </div>
         </div>
       </div>
-      <McpConnectionsDialog
-        open={showConnections}
-        onOpenChange={setShowConnections}
-        connections={connections}
-        onConnect={handleConnectMcp}
-        onRevoke={disconnectMcp}
-        isLoading={connectionsLoading}
-      />
+      {connections.length > 0 && (
+        <McpConnectionsDialog
+          open={showConnections}
+          onOpenChange={setShowConnections}
+          connections={connections}
+          onConnect={handleConnectMcp}
+          onRevoke={disconnectMcp}
+          isLoading={connectionsLoading}
+        />
+      )}
     </div>
   );
 }

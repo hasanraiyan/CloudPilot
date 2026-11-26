@@ -13,7 +13,7 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().trim().min(1).default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(900000),
-  RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
+  RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(1000),
   DATABASE_URL: z.string().trim().min(1).startsWith("postgresql://"),
   REDIS_URL: z.string().trim().min(1).startsWith("redis://"),
   GITHUB_CLIENT_ID: z.string().trim().min(1).optional(),

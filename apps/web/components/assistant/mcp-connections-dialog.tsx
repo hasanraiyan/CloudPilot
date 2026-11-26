@@ -1,8 +1,15 @@
 "use client";
 
 import type { PersonaMcpConnection } from "@personaai/react";
-import { ExternalLink, Plug, Unplug, X } from "lucide-react";
+import { ExternalLink, Plug, Unplug } from "lucide-react";
 import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type McpStatus = NonNullable<PersonaMcpConnection["status"]>;
 
@@ -49,8 +56,6 @@ export function McpConnectionsDialog({
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (!open) return null;
-
   const handleRevoke = async (mcpId: string) => {
     setRevokingId(mcpId);
     setError(null);
@@ -64,36 +69,17 @@ export function McpConnectionsDialog({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="MCP Connections"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={() => onOpenChange(false)}
-    >
-      <div
-        className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-          <div className="flex items-center gap-2">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[80vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-md">
+        <DialogHeader className="border-b border-zinc-200 px-4 py-3.5 dark:border-zinc-800">
+          <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
             <Plug className="size-4 text-zinc-500" />
-            <div>
-              <h2 className="text-sm font-semibold">MCP Connections</h2>
-              <p className="text-[11px] text-zinc-500">
-                Connect or revoke per-user OAuth MCP tools for this assistant.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            aria-label="Close connections dialog"
-            className="grid size-7 place-items-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
+            MCP Connections
+          </DialogTitle>
+          <DialogDescription className="text-xs text-zinc-500">
+            Connect or revoke per-user OAuth MCP tools for this assistant.
+          </DialogDescription>
+        </DialogHeader>
 
         {error && (
           <div className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
@@ -155,7 +141,7 @@ export function McpConnectionsDialog({
             })
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

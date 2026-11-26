@@ -170,9 +170,13 @@ when a currently required dependency is unavailable.
 - Secret encryption and key rotation are designed but not yet operational.
 - Worker graceful shutdown on Unix-style signals requires final container-platform verification.
 
-## Author
+## Authors
 
 **Razique Hasan**
 
 - GitHub: https://github.com/raziquehasan
 - Repository: https://github.com/raziquehasan/CloudPilot
+
+**Raiyan Hasan**
+
+- Website: https://hasanraiyan.me

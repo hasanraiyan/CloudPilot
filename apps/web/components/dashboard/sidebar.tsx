@@ -79,10 +79,10 @@ export function DashboardSidebar({ mobile = false, onNavigate }: { mobile?: bool
           }}
           aria-label={isOpen ? "Hide AI Assistant" : "Open AI Assistant"}
           title={compact ? "AI Assistant" : undefined}
-          className={`flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1 text-[12px] transition-colors ${
+          className={`flex min-h-9 w-full items-center gap-2.5 rounded-lg border px-2.5 py-1 text-[12px] transition-colors ${
             isOpen
-              ? "bg-zinc-950 font-medium text-white dark:bg-white dark:text-zinc-950"
-              : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"
+              ? "border-zinc-300 bg-zinc-100 font-medium text-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+              : "border-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"
           } ${compact ? "justify-center" : ""}`}
         >
           <Bot className="size-4 shrink-0" />

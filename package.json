@@ -57,7 +57,7 @@
     "self-healing",
     "ai"
   ],
-  "author": "Razique Hasan",
+  "author": "Razique Hasan & Raiyan Hasan (https://hasanraiyan.me)",
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0",

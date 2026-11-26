@@ -429,11 +429,12 @@ export default function Home() {
               links={[
                 ["GitHub", githubUrl],
                 ["Razique Hasan", "https://github.com/raziquehasan"],
+                ["Raiyan Hasan", "https://hasanraiyan.me"],
               ]}
             />
           </div>
           <div className="mt-10 flex flex-col gap-3 border-t border-zinc-200 pt-6 text-[11px] text-zinc-500 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
-            <p>© CloudPilot. Developed by Razique Hasan.</p>
+            <p>© CloudPilot. Developed by Razique Hasan &amp; Raiyan Hasan.</p>
             <p>Development preview — not live infrastructure data.</p>
           </div>
         </div>
